@@ -1,0 +1,1476 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FiresChain</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background:
+        radial-gradient(80% 70% at 50% 22%, #1e3f78 0%, #0b1731 45%, #050a16 100%);
+    }
+
+    #scene-root {
+      position: absolute;
+      inset: 0;
+    }
+
+    #scene-root canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .site-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 28px;
+      color: #e8f0ff;
+      background: linear-gradient(180deg, rgba(6, 12, 26, 0.8) 0%, rgba(6, 12, 26, 0.35) 75%, rgba(6, 12, 26, 0) 100%);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      pointer-events: auto;
+    }
+
+    .brand {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+    }
+
+    .site-nav {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      font-size: 12px;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+
+    .site-nav a {
+      color: #d7e6ff;
+      text-decoration: none;
+      padding: 6px 0;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .site-nav a:hover {
+      color: #ffffff;
+      border-bottom-color: rgba(255, 255, 255, 0.6);
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">FiresChain</div>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="#products">Products</a>
+      <a href="#services">Services</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#about">About Us</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
+  <div id="scene-root"></div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    const root = document.getElementById('scene-root');
+    const LIMITS = {
+      zoomMin: 2.0,
+      zoomMax: 36.0,
+      thicknessMin: 0.4,
+      thicknessMax: 4.0,
+      yawMin: -Math.PI + 0.01,
+      yawMax: Math.PI - 0.01,
+      pitchMin: -0.15,
+      pitchMax: 0.72,
+      radiusMin: 3.0,
+      radiusMax: 40.0
+    };
+
+    const DEFAULT_INIT = {
+      zoom: 8.47,
+      thickness: 0.4,
+      yaw: 0.865683308989187,
+      pitch: 0.411897703470662,
+      radius: 8.47
+    };
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function parseQueryNumber(params, key, min, max) {
+      const raw = params.get(key);
+      if (raw === null) return null;
+      const trimmed = String(raw).trim();
+      if (!trimmed) return null;
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return null;
+      return clamp(n, min, max);
+    }
+
+    function readInitConfigFromQuery() {
+      const q = new URLSearchParams(window.location.search);
+      const hasAnyQueryParam = ['zoom', 'thickness', 'yaw', 'pitch'].some((key) => q.has(key));
+      if (!hasAnyQueryParam) {
+        return {
+          config: {
+            zoom: DEFAULT_INIT.zoom,
+            thickness: DEFAULT_INIT.thickness,
+            yaw: DEFAULT_INIT.yaw,
+            pitch: DEFAULT_INIT.pitch
+          },
+          shouldClearQuery: false
+        };
+      }
+
+      const zoom = parseQueryNumber(q, 'zoom', LIMITS.zoomMin, LIMITS.zoomMax);
+      const thickness = parseQueryNumber(q, 'thickness', LIMITS.thicknessMin, LIMITS.thicknessMax);
+      const yawDeg = parseQueryNumber(
+        q,
+        'yaw',
+        THREE.MathUtils.radToDeg(LIMITS.yawMin),
+        THREE.MathUtils.radToDeg(LIMITS.yawMax)
+      );
+      const pitchDeg = parseQueryNumber(
+        q,
+        'pitch',
+        THREE.MathUtils.radToDeg(LIMITS.pitchMin),
+        THREE.MathUtils.radToDeg(LIMITS.pitchMax)
+      );
+
+      const hasCompleteValidQuery = zoom !== null && thickness !== null && yawDeg !== null && pitchDeg !== null;
+      if (!hasCompleteValidQuery) {
+        return {
+          config: {
+            zoom: DEFAULT_INIT.zoom,
+            thickness: DEFAULT_INIT.thickness,
+            yaw: DEFAULT_INIT.yaw,
+            pitch: DEFAULT_INIT.pitch
+          },
+          shouldClearQuery: true
+        };
+      }
+
+      const parsed = {
+        zoom,
+        thickness,
+        yaw: THREE.MathUtils.degToRad(yawDeg),
+        pitch: THREE.MathUtils.degToRad(pitchDeg)
+      };
+
+      // 历史异常参数兜底：避免首次加载落到极近、正前方视角。
+      const isKnownBrokenPreset =
+        Math.abs(parsed.zoom - LIMITS.zoomMin) < 0.0001 &&
+        Math.abs(parsed.thickness - LIMITS.thicknessMin) < 0.0001 &&
+        Math.abs(yawDeg) < 0.0001 &&
+        Math.abs(pitchDeg) < 0.0001;
+
+      if (isKnownBrokenPreset) {
+        return {
+          config: {
+            zoom: DEFAULT_INIT.zoom,
+            thickness: DEFAULT_INIT.thickness,
+            yaw: DEFAULT_INIT.yaw,
+            pitch: DEFAULT_INIT.pitch
+          },
+          shouldClearQuery: true
+        };
+      }
+
+      return {
+        config: parsed,
+        shouldClearQuery: false
+      };
+    }
+
+    const initConfigResult = readInitConfigFromQuery();
+    const initConfig = initConfigResult.config;
+    if (initConfigResult.shouldClearQuery && window.history && window.history.replaceState) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    let zoomDenominator = initConfig.zoom;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x050a16, 9, 18);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 180);
+    camera.position.set(4.6, 2.1, 6.4);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    root.appendChild(renderer.domElement);
+
+    const textureLoader = new THREE.TextureLoader();
+    const wallTexture = textureLoader.load('assets/images/wall.jpg');
+    wallTexture.colorSpace = THREE.SRGBColorSpace;
+    wallTexture.wrapS = THREE.ClampToEdgeWrapping;
+    wallTexture.wrapT = THREE.ClampToEdgeWrapping;
+    wallTexture.repeat.set(1, 1);
+    wallTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    const groundTexture = textureLoader.load('assets/images/ground.jpg?v=2');
+    groundTexture.colorSpace = THREE.SRGBColorSpace;
+    groundTexture.wrapS = THREE.ClampToEdgeWrapping;
+    groundTexture.wrapT = THREE.ClampToEdgeWrapping;
+    groundTexture.repeat.set(1, 1);
+    groundTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    const leftPaintingTexture = textureLoader.load('assets/images/left_picture-removebg-preview.png');
+    leftPaintingTexture.colorSpace = THREE.SRGBColorSpace;
+    leftPaintingTexture.wrapS = THREE.ClampToEdgeWrapping;
+    leftPaintingTexture.wrapT = THREE.ClampToEdgeWrapping;
+    leftPaintingTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    const rightPaintingTexture = textureLoader.load('assets/images/right_picture-removebg-preview.png');
+    rightPaintingTexture.colorSpace = THREE.SRGBColorSpace;
+    rightPaintingTexture.wrapS = THREE.ClampToEdgeWrapping;
+    rightPaintingTexture.wrapT = THREE.ClampToEdgeWrapping;
+    rightPaintingTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    function createEllipsisTexture() {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = 160;
+      const ctx = c.getContext('2d');
+
+      function roundedRect(x, y, w, h, r) {
+        const rr = Math.min(r, w * 0.5, h * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.lineTo(x + w - rr, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+        ctx.lineTo(x + w, y + h - rr);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+        ctx.lineTo(x + rr, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+        ctx.lineTo(x, y + rr);
+        ctx.quadraticCurveTo(x, y, x + rr, y);
+        ctx.closePath();
+      }
+
+      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      roundedRect(18, 20, 220, 108, 30);
+      ctx.fillStyle = 'rgba(245, 248, 255, 1)';
+      ctx.fill();
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = 'rgba(90, 110, 140, 1)';
+      ctx.stroke();
+
+      // little tail
+      ctx.beginPath();
+      ctx.moveTo(122, 128);
+      ctx.lineTo(136, 128);
+      ctx.lineTo(130, 146);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(245, 248, 255, 1)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(90, 110, 140, 1)';
+      ctx.stroke();
+
+      // ellipsis dots
+      ctx.fillStyle = 'rgba(75, 92, 118, 1)';
+      const cx = 128;
+      const cy = 78;
+      const r = 10;
+      const gap = 28;
+      for (let i = -1; i <= 1; i += 1) {
+        ctx.beginPath();
+        ctx.arc(cx + i * gap, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      return tex;
+    }
+
+    const ellipsisTexture = createEllipsisTexture();
+
+    const room = new THREE.Group();
+    scene.add(room);
+
+    const amb = new THREE.AmbientLight(0xffffff, 0.62);
+    scene.add(amb);
+
+    const key = new THREE.DirectionalLight(0xbfd8ff, 1.2);
+    key.position.set(5, 5, 4);
+    scene.add(key);
+
+    const fill = new THREE.PointLight(0x4e7cc4, 1.05, 16, 2);
+    fill.position.set(0.2, 1.4, 0.3);
+    room.add(fill);
+
+    const wallMatBack = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: wallTexture,
+      roughness: 0.92,
+      metalness: 0.04
+    });
+
+    const wallMatLeft = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: wallTexture,
+      roughness: 0.92,
+      metalness: 0.04
+    });
+
+    // 外延墙体使用纯黑，避免“贴纸感”
+    const wallMatOuter = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      side: THREE.DoubleSide
+    });
+
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: groundTexture,
+      roughness: 0.94,
+      metalness: 0.02
+    });
+
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(8, 4.8), wallMatBack);
+    backWall.position.set(0, 0.4, -4);
+    room.add(backWall);
+
+    const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(8, 4.8), wallMatLeft);
+    leftWall.position.set(-4, 0.4, 0);
+    leftWall.rotation.y = Math.PI / 2;
+    room.add(leftWall);
+
+    // 外延房间：墙和地面向墙角外扩展一倍
+    // 外延墙略微重叠，避免墙角出现缝隙
+    const backWallOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.3, 9.6), wallMatOuter);
+    backWallOuter.position.set(4.02, 0.4, -4.09);
+    room.add(backWallOuter);
+
+    const leftWallOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.3, 9.6), wallMatOuter);
+    leftWallOuter.position.set(-4.09, 0.4, 4.02);
+    leftWallOuter.rotation.y = Math.PI / 2;
+    room.add(leftWallOuter);
+
+    // 角柱封缝，彻底遮住墙角交界线
+    const cornerSeal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 9.6, 0.08), wallMatOuter);
+    // 角柱略缩并向内侧回退，避免挡住外侧曲线接缝。
+    cornerSeal.position.set(-3.98, 0.4, -3.98);
+    room.add(cornerSeal);
+
+    // 地板同样分层：内地板贴图，外延区域纯黑
+    const floorOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.4, 16.4), wallMatOuter);
+    floorOuter.rotation.x = -Math.PI / 2;
+    floorOuter.position.set(4, -2.03, 4);
+    room.add(floorOuter);
+
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(8.2, 8.2), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, -2.0, 0);
+    room.add(floor);
+
+    function addEdgeTrim(parentMesh, width, height, options = {}) {
+      const {
+        top = 0,
+        bottom = 0,
+        left = 0,
+        right = 0,
+        opacity = 0.82,
+        z = 0.012
+      } = options;
+
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        depthTest: true,
+        side: THREE.DoubleSide
+      });
+
+      if (top > 0.001) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(width, top), mat);
+        m.position.set(0, height * 0.5 - top * 0.5, z);
+        parentMesh.add(m);
+      }
+      if (bottom > 0.001) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(width, bottom), mat);
+        m.position.set(0, -height * 0.5 + bottom * 0.5, z);
+        parentMesh.add(m);
+      }
+      if (left > 0.001) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(left, height), mat);
+        m.position.set(-width * 0.5 + left * 0.5, 0, z);
+        parentMesh.add(m);
+      }
+      if (right > 0.001) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(right, height), mat);
+        m.position.set(width * 0.5 - right * 0.5, 0, z);
+        parentMesh.add(m);
+      }
+    }
+
+    // 墙/地板边缘压边，隐藏贴图与外黑墙的交界亮边。
+    addEdgeTrim(backWall, 8, 4.8, { top: 0.08, bottom: 0.08, left: 0.12, right: 0.12, opacity: 0.78, z: 0.012 });
+    addEdgeTrim(leftWall, 8, 4.8, { top: 0.08, bottom: 0.08, left: 0.12, right: 0.12, opacity: 0.78, z: 0.012 });
+    addEdgeTrim(floor, 8.2, 8.2, { top: 0.14, right: 0.14, opacity: 0.72, z: 0.008 });
+
+    function makeEdgeFadeAlphaMap(fades, size = 512, strength = 0.92) {
+      const leftFade = clamp(fades.left || 0, 0, 0.49);
+      const rightFade = clamp(fades.right || 0, 0, 0.49);
+      const topFade = clamp(fades.top || 0, 0, 0.49);
+      const bottomFade = clamp(fades.bottom || 0, 0, 0.49);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(size, size);
+      const data = img.data;
+
+      function smoothstep(t) {
+        const x = clamp(t, 0, 1);
+        return x * x * (3 - 2 * x);
+      }
+
+      for (let y = 0; y < size; y += 1) {
+        const v = (y + 0.5) / size;
+        for (let x = 0; x < size; x += 1) {
+          const u = (x + 0.5) / size;
+          let edge = 0;
+
+          if (leftFade > 0 && u < leftFade) {
+            edge = Math.max(edge, (leftFade - u) / leftFade);
+          }
+          if (rightFade > 0 && u > 1 - rightFade) {
+            edge = Math.max(edge, (u - (1 - rightFade)) / rightFade);
+          }
+          if (bottomFade > 0 && v < bottomFade) {
+            edge = Math.max(edge, (bottomFade - v) / bottomFade);
+          }
+          if (topFade > 0 && v > 1 - topFade) {
+            edge = Math.max(edge, (v - (1 - topFade)) / topFade);
+          }
+
+          const fade = Math.pow(smoothstep(edge), 1.15);
+          const alpha = Math.round(fade * 255 * clamp(strength, 0, 1));
+          const idx = (y * size + x) * 4;
+          data[idx] = alpha;
+          data[idx + 1] = alpha;
+          data[idx + 2] = alpha;
+          data[idx + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(img, 0, 0);
+      const alphaMap = new THREE.CanvasTexture(canvas);
+      alphaMap.minFilter = THREE.LinearFilter;
+      alphaMap.magFilter = THREE.LinearFilter;
+      alphaMap.generateMipmaps = false;
+      return alphaMap;
+    }
+
+    function addInnerEdgeFadeOverlay(targetMesh, width, height, options = {}) {
+      const {
+        fades = { right: 0.2, top: 0.12, bottom: 0.12, left: 0.02 },
+        strength = 0.88,
+        nudge = 0.008
+      } = options;
+
+      const alphaMap = makeEdgeFadeAlphaMap(fades, 512, strength);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        alphaMap,
+        transparent: true,
+        opacity: 1.0,
+        depthWrite: false,
+        depthTest: true,
+        side: THREE.DoubleSide
+      });
+
+      const overlay = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+      overlay.position.copy(targetMesh.position);
+      overlay.rotation.copy(targetMesh.rotation);
+      const normal = new THREE.Vector3(0, 0, 1).applyEuler(overlay.rotation).normalize();
+      overlay.position.addScaledVector(normal, nudge);
+      overlay.renderOrder = 4;
+      room.add(overlay);
+      return overlay;
+    }
+
+    addInnerEdgeFadeOverlay(backWall, 8, 4.8, {
+      fades: { right: 0.22, top: 0.12, bottom: 0.12, left: 0.0 },
+      strength: 0.82,
+      nudge: 0.01
+    });
+    addInnerEdgeFadeOverlay(leftWall, 8, 4.8, {
+      fades: { right: 0.0, top: 0.12, bottom: 0.12, left: 0.22 },
+      strength: 0.82,
+      nudge: 0.01
+    });
+    addInnerEdgeFadeOverlay(floor, 8.2, 8.2, {
+      fades: { right: 0.24, top: 0.24, bottom: 0.0, left: 0.0 },
+      strength: 0.74,
+      nudge: 0.004
+    });
+
+    function addLittleFigure() {
+      const figure = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x1f2735,
+        roughness: 0.58,
+        metalness: 0.12
+      });
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 20), mat);
+      head.position.y = 0.62;
+      figure.add(head);
+
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.165, 0.46, 18), mat);
+      torso.position.y = 0.30;
+      figure.add(torso);
+
+      // 正面标记，让“朝向”有明显视觉
+      const chest = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.16, 0.04),
+        new THREE.MeshStandardMaterial({ color: 0x1a2331, roughness: 0.5, metalness: 0.2 })
+      );
+      chest.position.set(0, 0.30, 0.12);
+      figure.add(chest);
+
+      const legGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.34, 12);
+      const legL = new THREE.Mesh(legGeo, mat);
+      const legR = new THREE.Mesh(legGeo, mat);
+      legL.position.set(-0.07, 0.0, 0);
+      legR.position.set(0.07, 0.0, 0);
+      figure.add(legL);
+      figure.add(legR);
+
+      const armGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.28, 12);
+      const armL = new THREE.Mesh(armGeo, mat);
+      const armR = new THREE.Mesh(armGeo, mat);
+      armL.position.set(-0.19, 0.28, 0);
+      armR.position.set(0.19, 0.28, 0);
+      armL.rotation.z = -0.42;
+      armR.rotation.z = 0.42;
+      figure.add(armL);
+      figure.add(armR);
+
+      figure.position.set(0.15, -1.83, -0.9);
+      figure.scale.setScalar(1.35);
+      room.add(figure);
+
+      const shadow = new THREE.Mesh(
+        new THREE.CircleGeometry(0.28, 32),
+        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false })
+      );
+      shadow.rotation.x = -Math.PI / 2;
+      shadow.position.set(0.15, -1.995, -0.9);
+      room.add(shadow);
+
+      // 头顶省略号，支持点击但不触发业务动作
+      const bubble = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: ellipsisTexture,
+          transparent: false,
+          alphaTest: 0.45,
+          depthWrite: true
+        })
+      );
+      bubble.scale.set(0.95, 0.66, 1);
+      bubble.position.set(0, 1.38, 0.02);
+      bubble.name = 'ellipsis-bubble';
+      figure.add(bubble);
+
+      // 面朝墙角（左后角）
+      const cornerTarget = new THREE.Vector3(-4, figure.position.y + 0.25, -4);
+      figure.lookAt(cornerTarget);
+
+      return { figure, bubble };
+    }
+
+    const littleFigure = addLittleFigure();
+    const interactiveTargets = [littleFigure.bubble];
+    const raycaster = new THREE.Raycaster();
+    const pointerNdc = new THREE.Vector2();
+
+    function addFramedPainting(parentWall, texture, width, height, x, y) {
+      const frame = new THREE.Mesh(
+        new THREE.PlaneGeometry(width + 0.16, height + 0.16),
+        new THREE.MeshStandardMaterial({
+          color: 0x1a1a1a,
+          roughness: 0.7,
+          metalness: 0.2
+        })
+      );
+      frame.position.set(x, y, 0.01);
+      parentWall.add(frame);
+
+      const painting = new THREE.Mesh(
+        new THREE.PlaneGeometry(width, height),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: texture,
+          roughness: 0.56,
+          metalness: 0.06,
+          emissive: 0x101010,
+          emissiveIntensity: 0.25
+        })
+      );
+      painting.position.set(x, y, 0.02);
+      parentWall.add(painting);
+      return { frame, painting };
+    }
+
+    // 左墙挂画
+    const leftPaintingMesh = addFramedPainting(leftWall, leftPaintingTexture, 2.95, 2.38, 0.25, 0.5);
+    // 后墙挂画
+    const backPaintingMesh = addFramedPainting(backWall, rightPaintingTexture, 3.2, 2.38, 1.15, 0.5);
+    const zoomReferenceMeshes = [leftPaintingMesh.painting, backPaintingMesh.painting];
+
+    function addPaintingSpotlight(parentWall, targetX, targetY, color = 0xfff0cf) {
+      const spot = new THREE.SpotLight(color, 1.8, 10, Math.PI / 7, 0.32, 1.2);
+      spot.position.set(targetX, targetY + 1.0, 1.2);
+      const target = new THREE.Object3D();
+      target.position.set(targetX, targetY, 0.02);
+      parentWall.add(target);
+      spot.target = target;
+      parentWall.add(spot);
+    }
+
+    addPaintingSpotlight(leftWall, 0.25, 0.5);
+    addPaintingSpotlight(backWall, 1.15, 0.5);
+
+    const figureTopLight = new THREE.PointLight(0xe6f2ff, 1.3, 5.5, 2);
+    figureTopLight.position.set(
+      littleFigure.figure.position.x + 0.05,
+      littleFigure.figure.position.y + 1.45,
+      littleFigure.figure.position.z + 0.2
+    );
+    room.add(figureTopLight);
+
+    // Debug guides removed for final scene.
+
+    // --- 墙面曲线（demo 同款逻辑与样式） ---
+    const wallCurveFaces = [];
+    const wallCurveOrder = 4;
+    const wallCurveSpeed = 16;
+    let wallCurveCurrentSpeed = wallCurveSpeed;
+    const wallCurveRebuildDebounceMs = 120;
+    let wallCurveRebuildTimer = null;
+    let wallCurveThicknessMultiplier = initConfig.thickness;
+    let wallCurveState = 'DRAWING';
+    const wallCurveSweepBaseSpeed = 0.0028;
+
+    function createGlowMarkerTexture() {
+      const c = document.createElement('canvas');
+      c.width = 96;
+      c.height = 96;
+      const ctx = c.getContext('2d');
+      const g = ctx.createRadialGradient(48, 48, 0, 48, 48, 48);
+      g.addColorStop(0, 'rgba(255, 245, 190, 1)');
+      g.addColorStop(0.25, 'rgba(255, 190, 90, 0.95)');
+      g.addColorStop(0.65, 'rgba(255, 150, 40, 0.35)');
+      g.addColorStop(1, 'rgba(255, 140, 30, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 96, 96);
+      const tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      return tex;
+    }
+
+    const wallCurveGlowTexture = createGlowMarkerTexture();
+
+    function createWallCurveFace(parentWall, wallWidth, wallHeight, options = {}) {
+      const {
+        extendW = 1.22,
+        extendH = 1.08,
+        seamSide = 'left',
+        seamOverlap = 0,
+        anchorUV = { x: 0.04, y: 0.62 },
+        zOffset = -0.045,
+        orderBias = 0,
+        isFloor = false,
+        coverageBoost = 1
+      } = options;
+
+      const canvas = document.createElement('canvas');
+      const textureDpr = Math.min(window.devicePixelRatio || 1, 1.35);
+      canvas.width = Math.round((isFloor ? 1700 : 1360) * textureDpr);
+      canvas.height = Math.round((isFloor ? 1700 : 900) * textureDpr);
+      const ctx = canvas.getContext('2d');
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+      const mat = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        depthTest: true,
+        side: THREE.DoubleSide
+      });
+
+      const drawWidth = wallWidth * extendW;
+      const drawHeight = wallHeight * extendH;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(drawWidth, drawHeight), mat);
+      // 曲线层放在墙后面（最下层）
+      mesh.position.z = zOffset;
+      mesh.renderOrder = -30;
+      const seamOffset = (drawWidth - wallWidth) * 0.5;
+      // 保持墙角接缝侧对齐：left=固定左边；right=固定右边
+      if (seamSide === 'none') {
+        mesh.position.x = 0;
+      } else {
+        mesh.position.x = seamSide === 'right' ? -seamOffset : seamOffset;
+      }
+      parentWall.add(mesh);
+
+      const sweepGeometry = new THREE.BufferGeometry();
+      sweepGeometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+      const sweepMaterial = new THREE.PointsMaterial({
+        map: wallCurveGlowTexture,
+        color: 0xffd887,
+        size: 0.18,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true
+      });
+      const sweepPoints = new THREE.Points(sweepGeometry, sweepMaterial);
+      sweepPoints.visible = false;
+      sweepPoints.renderOrder = -10;
+      mesh.add(sweepPoints);
+
+      wallCurveFaces.push({
+        canvas,
+        mesh,
+        sweepPoints,
+        ctx,
+        texture,
+        width: canvas.width,
+        height: canvas.height,
+        points: [],
+        wallWidth,
+        wallHeight,
+        extendW,
+        extendH,
+        seamSide,
+        seamOverlap,
+        zOffset,
+        anchorUV,
+        orderBias,
+        isFloor,
+        coverageBoost,
+        coverageScale: 1,
+        drawCursor: 0,
+        stepAccumulator: 0,
+        stepMultiplier: 1,
+        sweepTime: 0,
+        sweepSegmentCount: 0,
+        sweepStartsX: new Float32Array(0),
+        sweepStartsY: new Float32Array(0),
+        sweepEndsX: new Float32Array(0),
+        sweepEndsY: new Float32Array(0),
+        sweepPhases: new Float32Array(0)
+      });
+    }
+
+    function getCurveCoverageScale() {
+      const zoomScale = clamp(zoomDenominator / 4.2, 1.05, 3.2);
+      const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+      const aspectBoost = clamp(aspect / 1.78, 0.95, 1.15);
+      return zoomScale * aspectBoost;
+    }
+
+    function updateWallCurveFaceLayouts() {
+      const baseScale = getCurveCoverageScale();
+
+      wallCurveFaces.forEach((face) => {
+        const coverageScale = baseScale * face.coverageBoost;
+        face.coverageScale = coverageScale;
+        const drawWidth = face.wallWidth * face.extendW * coverageScale;
+        const drawHeight = face.wallHeight * face.extendH * coverageScale;
+
+        const prevParams = face.mesh.geometry && face.mesh.geometry.parameters;
+        const prevWidth = prevParams && prevParams.width ? prevParams.width : 0;
+        const prevHeight = prevParams && prevParams.height ? prevParams.height : 0;
+        if (Math.abs(prevWidth - drawWidth) > 0.01 || Math.abs(prevHeight - drawHeight) > 0.01) {
+          face.mesh.geometry.dispose();
+          face.mesh.geometry = new THREE.PlaneGeometry(drawWidth, drawHeight);
+        }
+        face.mesh.position.z = face.zOffset;
+
+        const seamOffset = (drawWidth - face.wallWidth) * 0.5;
+        const overlap = clamp(face.seamOverlap || 0, 0, Math.max(0, seamOffset - 0.001));
+        if (face.seamSide === 'none') {
+          face.mesh.position.x = 0;
+        } else {
+          const alignedShift = seamOffset - overlap;
+          face.mesh.position.x = face.seamSide === 'right' ? -alignedShift : alignedShift;
+        }
+
+        face.width = face.canvas.width;
+        face.height = face.canvas.height;
+      });
+    }
+
+    function requestWallCurveRebuild(immediate = false) {
+      if (wallCurveRebuildTimer) {
+        clearTimeout(wallCurveRebuildTimer);
+        wallCurveRebuildTimer = null;
+      }
+      if (immediate) {
+        rebuildWallCurves();
+        return;
+      }
+      wallCurveRebuildTimer = setTimeout(() => {
+        wallCurveRebuildTimer = null;
+        rebuildWallCurves();
+      }, wallCurveRebuildDebounceMs);
+    }
+
+    // demo 同款希尔伯特逻辑
+    function getLogicalHilbert(n) {
+      const pts = [];
+      function recurse(x, y, xi, xj, yi, yj, step) {
+        if (step <= 0) {
+          pts.push({ x: x + (xi + yi) / 2, y: y + (xj + yj) / 2 });
+          return;
+        }
+        recurse(x, y, yi / 2, yj / 2, xi / 2, xj / 2, step - 1);
+        recurse(x + xi / 2, y + xj / 2, xi / 2, xj / 2, yi / 2, yj / 2, step - 1);
+        recurse(x + xi / 2 + yi / 2, y + xj / 2 + yj / 2, xi / 2, xj / 2, yi / 2, yj / 2, step - 1);
+        recurse(x + xi / 2 + yi, y + xj / 2 + yj, -yi / 2, -yj / 2, -xi / 2, -xj / 2, step - 1);
+      }
+      recurse(0, 0, 1, 0, 0, 1, n);
+      return pts;
+    }
+
+    function chooseWallCurvePoints(logicalPts, face, margins, drawW, drawH) {
+      const marginLeft = margins.left;
+      const marginTop = margins.top;
+      const variants = [
+        [false, false, false],
+        [true, false, false],
+        [false, true, false],
+        [true, true, false],
+        [false, false, true],
+        [true, false, true],
+        [false, true, true],
+        [true, true, true]
+      ];
+
+      const target = {
+        x: marginLeft + face.anchorUV.x * drawW,
+        y: marginTop + face.anchorUV.y * drawH
+      };
+
+      let best = null;
+      let bestDist = Number.POSITIVE_INFINITY;
+
+      for (const [flipX, flipY, reverse] of variants) {
+        const mapped = logicalPts.map((pt) => {
+          const u = flipX ? 1 - pt.x : pt.x;
+          const v = flipY ? 1 - pt.y : pt.y;
+          return {
+            x: marginLeft + u * drawW,
+            y: marginTop + v * drawH
+          };
+        });
+        if (reverse) mapped.reverse();
+
+        const dx = mapped[0].x - target.x;
+        const dy = mapped[0].y - target.y;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = mapped;
+        }
+      }
+      return best || [];
+    }
+
+    function resampleCurvePoints(points, spacing) {
+      if (!points || points.length < 2) return points || [];
+      const safeSpacing = Math.max(1, spacing);
+      const result = [{ x: points[0].x, y: points[0].y }];
+
+      function pushUnique(pt) {
+        const last = result[result.length - 1];
+        if (Math.hypot(last.x - pt.x, last.y - pt.y) > 0.001) {
+          result.push({ x: pt.x, y: pt.y });
+        }
+      }
+
+      let carry = 0;
+
+      for (let i = 1; i < points.length; i += 1) {
+        const segStart = points[i - 1];
+        const segEnd = points[i];
+
+        if (i > 1) {
+          const prevStart = points[i - 2];
+          const pdx = segStart.x - prevStart.x;
+          const pdy = segStart.y - prevStart.y;
+          const ndx = segEnd.x - segStart.x;
+          const ndy = segEnd.y - segStart.y;
+          const isTurn = Math.abs(pdx * ndx + pdy * ndy) < 1e-5;
+          if (isTurn) {
+            // 保留希尔伯特拐点，避免被等距采样“拉斜”。
+            pushUnique(segStart);
+            carry = 0;
+          }
+        }
+
+        const dx = segEnd.x - segStart.x;
+        const dy = segEnd.y - segStart.y;
+        const segLen = Math.hypot(dx, dy);
+        if (segLen < 1e-5) continue;
+
+        let dist = safeSpacing - carry;
+        while (dist <= segLen) {
+          const t = dist / segLen;
+          pushUnique({
+            x: segStart.x + dx * t,
+            y: segStart.y + dy * t
+          });
+          dist += safeSpacing;
+        }
+
+        const walked = dist - safeSpacing;
+        carry = segLen - walked;
+        if (carry < 1e-5) carry = 0;
+      }
+
+      const tail = points[points.length - 1];
+      pushUnique(tail);
+      return result;
+    }
+
+    function canvasPointToLocal(face, px, py) {
+      const geom = face.mesh.geometry && face.mesh.geometry.parameters;
+      const drawWidth = geom && geom.width ? geom.width : 1;
+      const drawHeight = geom && geom.height ? geom.height : 1;
+      const nx = px / Math.max(face.width, 1);
+      const ny = py / Math.max(face.height, 1);
+      return {
+        x: (nx - 0.5) * drawWidth,
+        y: (0.5 - ny) * drawHeight
+      };
+    }
+
+    function rebuildFaceSweepData(face) {
+      const segCount = Math.max(0, face.points.length - 1);
+      face.sweepSegmentCount = segCount;
+      face.sweepTime = 0;
+
+      if (segCount <= 0) {
+        face.sweepPoints.visible = false;
+        return;
+      }
+
+      const geom = face.sweepPoints.geometry;
+      const positionAttr = geom.getAttribute('position');
+      const needResize = !positionAttr || positionAttr.count !== segCount;
+      let positions = needResize ? new Float32Array(segCount * 3) : positionAttr.array;
+
+      if (face.sweepStartsX.length !== segCount) {
+        face.sweepStartsX = new Float32Array(segCount);
+        face.sweepStartsY = new Float32Array(segCount);
+        face.sweepEndsX = new Float32Array(segCount);
+        face.sweepEndsY = new Float32Array(segCount);
+        face.sweepPhases = new Float32Array(segCount);
+      }
+
+      for (let i = 0; i < segCount; i += 1) {
+        const a = canvasPointToLocal(face, face.points[i].x, face.points[i].y);
+        const b = canvasPointToLocal(face, face.points[i + 1].x, face.points[i + 1].y);
+        face.sweepStartsX[i] = a.x;
+        face.sweepStartsY[i] = a.y;
+        face.sweepEndsX[i] = b.x;
+        face.sweepEndsY[i] = b.y;
+        face.sweepPhases[i] = (i * 0.6180339887) % 1;
+        positions[i * 3] = a.x;
+        positions[i * 3 + 1] = a.y;
+        positions[i * 3 + 2] = 0.006;
+      }
+
+      if (needResize) {
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      } else {
+        positionAttr.needsUpdate = true;
+      }
+      geom.computeBoundingSphere();
+
+      const g = face.mesh.geometry && face.mesh.geometry.parameters;
+      const drawWidth = g && g.width ? g.width : 1;
+      const drawHeight = g && g.height ? g.height : 1;
+      face.sweepPoints.material.size = clamp(Math.min(drawWidth, drawHeight) * 0.05, 0.08, 0.26);
+      face.sweepPoints.visible = false;
+    }
+
+    function updateFaceSweepPoints(face) {
+      if (face.sweepSegmentCount <= 0) {
+        face.sweepPoints.visible = false;
+        return;
+      }
+      const positionAttr = face.sweepPoints.geometry.getAttribute('position');
+      if (!positionAttr) return;
+
+      const speed = wallCurveSweepBaseSpeed * (face.isFloor ? 0.9 : 1.0);
+      face.sweepTime = (face.sweepTime + speed) % 1;
+
+      const arr = positionAttr.array;
+      for (let i = 0; i < face.sweepSegmentCount; i += 1) {
+        const t = (face.sweepTime + face.sweepPhases[i]) % 1;
+        const sx = face.sweepStartsX[i];
+        const sy = face.sweepStartsY[i];
+        arr[i * 3] = sx + (face.sweepEndsX[i] - sx) * t;
+        arr[i * 3 + 1] = sy + (face.sweepEndsY[i] - sy) * t;
+        arr[i * 3 + 2] = 0.006;
+      }
+      positionAttr.needsUpdate = true;
+      face.sweepPoints.visible = true;
+    }
+
+    function rebuildWallCurves() {
+      wallCurveState = 'DRAWING';
+      updateWallCurveFaceLayouts();
+
+      const targetSpacing = clamp(
+        Math.min(window.innerWidth, window.innerHeight) / Math.pow(2, wallCurveOrder),
+        28,
+        76
+      );
+      const totalPixels = wallCurveFaces.reduce((sum, face) => sum + face.width * face.height, 0);
+      const perfFactor = clamp(2600000 / Math.max(1, totalPixels), 0.28, 1.0);
+      wallCurveCurrentSpeed = Math.max(4, Math.round(wallCurveSpeed * perfFactor));
+
+      wallCurveFaces.forEach((face) => {
+        const marginTop = face.height * 0.08;
+        const marginBottom = face.height * 0.08;
+        const defaultSideMargin = face.width * 0.06;
+        const seamSideMargin = face.width * 0.004;
+        let marginLeft = defaultSideMargin;
+        let marginRight = defaultSideMargin;
+        if (face.seamSide === 'left') marginLeft = seamSideMargin;
+        if (face.seamSide === 'right') marginRight = seamSideMargin;
+
+        const drawW = face.width - marginLeft - marginRight;
+        const drawH = face.height - marginTop - marginBottom;
+
+        const axisSize = Math.max(drawW, drawH);
+        let cellOrder = Math.round(Math.log2(axisSize / Math.max(1, targetSpacing)));
+        cellOrder += face.orderBias || 0;
+        cellOrder = Math.max(1, Math.min(cellOrder, 9));
+
+        const logicalPts = getLogicalHilbert(cellOrder);
+        const mappedPoints = chooseWallCurvePoints(
+          logicalPts,
+          face,
+          {
+            left: marginLeft,
+            right: marginRight,
+            top: marginTop,
+            bottom: marginBottom
+          },
+          drawW,
+          drawH
+        );
+        face.points = resampleCurvePoints(mappedPoints, targetSpacing);
+
+        face.ctx.clearRect(0, 0, face.width, face.height);
+        face.ctx.lineWidth = Math.max(0.5, targetSpacing * 0.15) * wallCurveThicknessMultiplier;
+        face.ctx.lineCap = 'round';
+        face.ctx.lineJoin = 'round';
+        face.texture.needsUpdate = true;
+        rebuildFaceSweepData(face);
+      });
+
+      const segmentCounts = wallCurveFaces.map((face) => Math.max(1, face.points.length - 1));
+      const averageSegments = segmentCounts.reduce((sum, count) => sum + count, 0) / Math.max(1, segmentCounts.length);
+      wallCurveFaces.forEach((face, idx) => {
+        face.drawCursor = 0;
+        face.stepAccumulator = 0;
+        const ratio = segmentCounts[idx] / Math.max(1, averageSegments);
+        face.stepMultiplier = clamp(ratio * (face.isFloor ? 1.08 : 1.0), 1.0, 2.4);
+        face.sweepTime = 0;
+      });
+    }
+
+    function drawWallCurveStep(face, index) {
+      if (index >= face.points.length - 1) return false;
+
+      const p1 = face.points[index];
+      const p2 = face.points[index + 1];
+      const ctx = face.ctx;
+
+      const lineGradient = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+      lineGradient.addColorStop(0, 'rgba(200, 100, 0, 0.05)');
+      lineGradient.addColorStop(1, 'rgba(255, 190, 0, 0.7)');
+
+      ctx.strokeStyle = lineGradient;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      ctx.globalCompositeOperation = 'lighter';
+      const radius = Math.max(2.5, ctx.lineWidth * 5);
+      const glow = ctx.createRadialGradient(p2.x, p2.y, 0, p2.x, p2.y, radius);
+      glow.addColorStop(0, 'rgba(255, 240, 180, 1)');
+      glow.addColorStop(0.2, 'rgba(255, 160, 0, 0.5)');
+      glow.addColorStop(1, 'rgba(255, 160, 0, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p2.x, p2.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      return true;
+    }
+
+    function animateWallCurves() {
+      let textureDirty = false;
+      if (wallCurveState === 'DRAWING') {
+        for (let i = 0; i < wallCurveCurrentSpeed; i += 1) {
+          const allDone = wallCurveFaces.every((face) => face.drawCursor >= face.points.length - 1);
+          if (allDone) {
+            wallCurveState = 'SWEEPING';
+            wallCurveFaces.forEach((face) => {
+              face.sweepTime = 0;
+              face.sweepPoints.visible = face.sweepSegmentCount > 0;
+            });
+            break;
+          }
+
+          wallCurveFaces.forEach((face) => {
+            if (face.drawCursor >= face.points.length - 1) return;
+            face.stepAccumulator += face.stepMultiplier;
+            const stepsToDraw = Math.floor(face.stepAccumulator);
+            if (stepsToDraw <= 0) return;
+            face.stepAccumulator -= stepsToDraw;
+
+            for (let s = 0; s < stepsToDraw; s += 1) {
+              if (face.drawCursor >= face.points.length - 1) break;
+              if (drawWallCurveStep(face, face.drawCursor)) textureDirty = true;
+              face.drawCursor += 1;
+            }
+          });
+        }
+      } else if (wallCurveState === 'SWEEPING') {
+        wallCurveFaces.forEach((face) => {
+          updateFaceSweepPoints(face);
+        });
+      }
+
+      if (textureDirty) {
+        wallCurveFaces.forEach((face) => {
+          face.texture.needsUpdate = true;
+        });
+      }
+    }
+
+    createWallCurveFace(leftWall, 8, 4.8, {
+      extendW: 2.0,
+      extendH: 2.0,
+      seamSide: 'right',
+      seamOverlap: 0.22,
+      anchorUV: { x: 0.96, y: 0.62 },
+      orderBias: 0,
+      coverageBoost: 1.18
+    });
+    createWallCurveFace(backWall, 8, 4.8, {
+      extendW: 2.0,
+      extendH: 2.0,
+      seamSide: 'left',
+      seamOverlap: 0.22,
+      anchorUV: { x: 0.035, y: 0.62 },
+      orderBias: 0,
+      coverageBoost: 1.18
+    });
+    createWallCurveFace(floorOuter, 16.4, 16.4, {
+      extendW: 1.0,
+      extendH: 1.0,
+      seamSide: 'none',
+      anchorUV: { x: 0.03, y: 0.04 },
+      zOffset: 0.012,
+      orderBias: 0,
+      isFloor: true,
+      coverageBoost: 1.35
+    });
+    rebuildWallCurves();
+
+    const camTarget = new THREE.Vector3(0, -0.05, -0.8);
+    let yaw = initConfig.yaw;
+    let pitch = initConfig.pitch;
+    let radius = DEFAULT_INIT.radius;
+    const controlsLocked = true;
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+    let downX = 0;
+    let downY = 0;
+    let clickCandidate = null;
+    const projectionTmp = new THREE.Vector3();
+
+    function setCameraPose(yawVal, pitchVal, radiusVal) {
+      const cp = Math.cos(pitchVal);
+      camera.position.set(
+        camTarget.x + radiusVal * Math.sin(yawVal) * cp,
+        camTarget.y + radiusVal * Math.sin(pitchVal),
+        camTarget.z + radiusVal * Math.cos(yawVal) * cp
+      );
+      camera.lookAt(camTarget);
+      camera.updateMatrixWorld(true);
+    }
+
+    function updateAtmosphereForRadius() {
+      if (!scene.fog) return;
+      // 缩小时拉远相机，雾效范围同步扩大，避免场景被雾完全吞没。
+      const near = Math.max(6, radius * 0.72);
+      const far = Math.max(18, radius * 2.25);
+      scene.fog.near = near;
+      scene.fog.far = far;
+    }
+
+    function updateCameraPose() {
+      updateAtmosphereForRadius();
+      setCameraPose(yaw, pitch, radius);
+    }
+
+    function getReferenceScreenAreaFraction() {
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+
+      for (const mesh of zoomReferenceMeshes) {
+        const geom = mesh.geometry;
+        if (!geom.boundingBox) geom.computeBoundingBox();
+        const bb = geom.boundingBox;
+        const xs = [bb.min.x, bb.max.x];
+        const ys = [bb.min.y, bb.max.y];
+        const zs = [bb.min.z, bb.max.z];
+
+        for (let ix = 0; ix < 2; ix += 1) {
+          for (let iy = 0; iy < 2; iy += 1) {
+            for (let iz = 0; iz < 2; iz += 1) {
+              projectionTmp.set(xs[ix], ys[iy], zs[iz]).applyMatrix4(mesh.matrixWorld).project(camera);
+              minX = Math.min(minX, projectionTmp.x);
+              minY = Math.min(minY, projectionTmp.y);
+              maxX = Math.max(maxX, projectionTmp.x);
+              maxY = Math.max(maxY, projectionTmp.y);
+            }
+          }
+        }
+      }
+
+      if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+        return 0;
+      }
+
+      const ndcWidth = clamp(maxX - minX, 0, 2);
+      const ndcHeight = clamp(maxY - minY, 0, 2);
+      return (ndcWidth * 0.5) * (ndcHeight * 0.5);
+    }
+
+    function solveRadiusForTargetArea(targetArea) {
+      let low = LIMITS.radiusMin;
+      let high = LIMITS.radiusMax;
+      let best = radius;
+
+      for (let i = 0; i < 22; i += 1) {
+        const mid = (low + high) * 0.5;
+        setCameraPose(yaw, pitch, mid);
+        const area = getReferenceScreenAreaFraction();
+        if (area > targetArea) {
+          low = mid;
+        } else {
+          high = mid;
+        }
+        best = mid;
+      }
+
+      return clamp(best, LIMITS.radiusMin, LIMITS.radiusMax);
+    }
+
+    function fitRadiusFromZoom() {
+      scene.updateMatrixWorld(true);
+      const targetArea = 1 / Math.max(LIMITS.zoomMin, zoomDenominator);
+      radius = solveRadiusForTargetArea(targetArea);
+      updateCameraPose();
+    }
+
+    function syncZoomFromCurrentCamera() {
+      updateCameraPose();
+      const area = getReferenceScreenAreaFraction();
+      if (area > 0.0001) {
+        zoomDenominator = clamp(1 / area, LIMITS.zoomMin, LIMITS.zoomMax);
+      }
+    }
+
+    function setPointerNdcFromEvent(e) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    }
+
+    function pickInteractive(e) {
+      setPointerNdcFromEvent(e);
+      raycaster.setFromCamera(pointerNdc, camera);
+      const hits = raycaster.intersectObjects(interactiveTargets, true);
+      return hits.length > 0 ? hits[0].object : null;
+    }
+
+    function updatePointerCursor(e) {
+      const hit = pickInteractive(e);
+      if (hit) {
+        renderer.domElement.style.cursor = 'pointer';
+      } else if (dragging) {
+        renderer.domElement.style.cursor = 'grabbing';
+      } else if (controlsLocked) {
+        renderer.domElement.style.cursor = 'default';
+      } else {
+        renderer.domElement.style.cursor = 'grab';
+      }
+      return hit;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      downX = e.clientX;
+      downY = e.clientY;
+      clickCandidate = pickInteractive(e);
+
+      if (clickCandidate) {
+        dragging = false;
+        renderer.domElement.style.cursor = 'pointer';
+        return;
+      }
+
+      if (controlsLocked) {
+        dragging = false;
+        renderer.domElement.style.cursor = 'default';
+        return;
+      }
+
+      dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+      renderer.domElement.style.cursor = 'grabbing';
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      updatePointerCursor(e);
+      if (!dragging) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      yaw = clamp(yaw - dx * 0.005, LIMITS.yawMin, LIMITS.yawMax);
+      pitch = clamp(pitch - dy * 0.004, LIMITS.pitchMin, LIMITS.pitchMax);
+    });
+
+    function stopDrag() {
+      dragging = false;
+      renderer.domElement.style.cursor = controlsLocked ? 'default' : 'grab';
+    }
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      const moveDistance = Math.hypot(e.clientX - downX, e.clientY - downY);
+      if (clickCandidate && moveDistance < 6) {
+        const hit = pickInteractive(e);
+        if (hit) {
+          // 可点击，但无业务行为
+        }
+      }
+      clickCandidate = null;
+      const previousZoom = zoomDenominator;
+      syncZoomFromCurrentCamera();
+      if (Math.abs(zoomDenominator - previousZoom) > 0.02) {
+        requestWallCurveRebuild(false);
+      }
+      stopDrag();
+    });
+    renderer.domElement.addEventListener('pointercancel', stopDrag);
+    renderer.domElement.addEventListener('pointerleave', stopDrag);
+
+    renderer.domElement.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        zoomDenominator = clamp(zoomDenominator + e.deltaY * 0.01, LIMITS.zoomMin, LIMITS.zoomMax);
+        fitRadiusFromZoom();
+        requestWallCurveRebuild(false);
+      },
+      { passive: false }
+    );
+
+    function animate() {
+      requestAnimationFrame(animate);
+      animateWallCurves();
+      updateCameraPose();
+      renderer.render(scene, camera);
+    }
+
+    fitRadiusFromZoom();
+    updateCameraPose();
+    renderer.domElement.style.cursor = controlsLocked ? 'default' : 'grab';
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      requestWallCurveRebuild(false);
+      fitRadiusFromZoom();
+      updateCameraPose();
+    });
+  </script>
+</body>
+</html>
