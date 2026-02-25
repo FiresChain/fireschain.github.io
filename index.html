@@ -217,12 +217,13 @@
     let zoomDenominator = initConfig.zoom;
 
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
     scene.fog = new THREE.Fog(0x050a16, 9, 18);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 180);
     camera.position.set(4.6, 2.1, 6.4);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -366,30 +367,39 @@
       metalness: 0.02
     });
 
-    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(8, 4.8), wallMatBack);
-    backWall.position.set(0, 0.4, -4);
+    const wallWidth = 8;
+    const portraitBoost = Math.max(0, (window.innerHeight / Math.max(1, window.innerWidth)) - 1);
+    const wallHeightScale = clamp(1 + portraitBoost * 0.35, 1, 1.35);
+    const wallHeight = 4.8 * wallHeightScale;
+    const outerWallHeight = Math.max(14.4, wallHeight * 2.4);
+    const wallBottomY = -2.0;
+    const wallCenterY = wallBottomY + wallHeight * 0.5;
+    const outerWallCenterY = wallBottomY + outerWallHeight * 0.5;
+
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(wallWidth, wallHeight), wallMatBack);
+    backWall.position.set(0, wallCenterY, -4);
     room.add(backWall);
 
-    const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(8, 4.8), wallMatLeft);
-    leftWall.position.set(-4, 0.4, 0);
+    const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(wallWidth, wallHeight), wallMatLeft);
+    leftWall.position.set(-4, wallCenterY, 0);
     leftWall.rotation.y = Math.PI / 2;
     room.add(leftWall);
 
     // 外延房间：墙和地面向墙角外扩展一倍
     // 外延墙略微重叠，避免墙角出现缝隙
-    const backWallOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.3, 9.6), wallMatOuter);
-    backWallOuter.position.set(4.02, 0.4, -4.09);
+    const backWallOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.3, outerWallHeight), wallMatOuter);
+    backWallOuter.position.set(4.02, outerWallCenterY, -4.09);
     room.add(backWallOuter);
 
-    const leftWallOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.3, 9.6), wallMatOuter);
-    leftWallOuter.position.set(-4.09, 0.4, 4.02);
+    const leftWallOuter = new THREE.Mesh(new THREE.PlaneGeometry(16.3, outerWallHeight), wallMatOuter);
+    leftWallOuter.position.set(-4.09, outerWallCenterY, 4.02);
     leftWallOuter.rotation.y = Math.PI / 2;
     room.add(leftWallOuter);
 
     // 角柱封缝，彻底遮住墙角交界线
-    const cornerSeal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 9.6, 0.08), wallMatOuter);
+    const cornerSeal = new THREE.Mesh(new THREE.BoxGeometry(0.08, outerWallHeight, 0.08), wallMatOuter);
     // 角柱略缩并向内侧回退，避免挡住外侧曲线接缝。
-    cornerSeal.position.set(-3.98, 0.4, -3.98);
+    cornerSeal.position.set(-3.98, outerWallCenterY, -3.98);
     room.add(cornerSeal);
 
     // 地板同样分层：内地板贴图，外延区域纯黑
@@ -445,8 +455,8 @@
     }
 
     // 墙/地板边缘压边，隐藏贴图与外黑墙的交界亮边。
-    addEdgeTrim(backWall, 8, 4.8, { top: 0.08, bottom: 0.08, left: 0.12, right: 0.12, opacity: 0.78, z: 0.012 });
-    addEdgeTrim(leftWall, 8, 4.8, { top: 0.08, bottom: 0.08, left: 0.12, right: 0.12, opacity: 0.78, z: 0.012 });
+    addEdgeTrim(backWall, wallWidth, wallHeight, { top: 0.08, bottom: 0.08, left: 0.12, right: 0.12, opacity: 0.78, z: 0.012 });
+    addEdgeTrim(leftWall, wallWidth, wallHeight, { top: 0.08, bottom: 0.08, left: 0.12, right: 0.12, opacity: 0.78, z: 0.012 });
     addEdgeTrim(floor, 8.2, 8.2, { top: 0.14, right: 0.14, opacity: 0.72, z: 0.008 });
 
     function makeEdgeFadeAlphaMap(fades, size = 512, strength = 0.92) {
@@ -532,12 +542,12 @@
       return overlay;
     }
 
-    addInnerEdgeFadeOverlay(backWall, 8, 4.8, {
+    addInnerEdgeFadeOverlay(backWall, wallWidth, wallHeight, {
       fades: { right: 0.22, top: 0.12, bottom: 0.12, left: 0.0 },
       strength: 0.82,
       nudge: 0.01
     });
-    addInnerEdgeFadeOverlay(leftWall, 8, 4.8, {
+    addInnerEdgeFadeOverlay(leftWall, wallWidth, wallHeight, {
       fades: { right: 0.0, top: 0.12, bottom: 0.12, left: 0.22 },
       strength: 0.82,
       nudge: 0.01
@@ -657,9 +667,9 @@
     }
 
     // 左墙挂画
-    const leftPaintingMesh = addFramedPainting(leftWall, leftPaintingTexture, 2.95, 2.38, 0.25, 0.5);
+    const leftPaintingMesh = addFramedPainting(leftWall, leftPaintingTexture, 3.25, 2.62, 0.15, 0.5);
     // 后墙挂画
-    const backPaintingMesh = addFramedPainting(backWall, rightPaintingTexture, 3.2, 2.38, 1.15, 0.5);
+    const backPaintingMesh = addFramedPainting(backWall, rightPaintingTexture, 3.5, 2.62, 0.7, 0.5);
     const zoomReferenceMeshes = [leftPaintingMesh.painting, backPaintingMesh.painting];
 
     function addPaintingSpotlight(parentWall, targetX, targetY, color = 0xfff0cf) {
@@ -672,8 +682,8 @@
       parentWall.add(spot);
     }
 
-    addPaintingSpotlight(leftWall, 0.25, 0.5);
-    addPaintingSpotlight(backWall, 1.15, 0.5);
+    addPaintingSpotlight(leftWall, 0.15, 0.5);
+    addPaintingSpotlight(backWall, 0.7, 0.5);
 
     const figureTopLight = new THREE.PointLight(0xe6f2ff, 1.3, 5.5, 2);
     figureTopLight.position.set(
@@ -1214,7 +1224,7 @@
       }
     }
 
-    createWallCurveFace(leftWall, 8, 4.8, {
+    createWallCurveFace(leftWall, wallWidth, wallHeight, {
       extendW: 2.0,
       extendH: 2.0,
       seamSide: 'right',
@@ -1223,7 +1233,7 @@
       orderBias: 0,
       coverageBoost: 1.18
     });
-    createWallCurveFace(backWall, 8, 4.8, {
+    createWallCurveFace(backWall, wallWidth, wallHeight, {
       extendW: 2.0,
       extendH: 2.0,
       seamSide: 'left',
