@@ -72,17 +72,85 @@
       color: #ffffff;
       border-bottom-color: rgba(255, 255, 255, 0.6);
     }
+
+    .site-nav button {
+      font: inherit;
+      color: #d7e6ff;
+      background: transparent;
+      border: 0;
+      padding: 6px 0;
+      cursor: pointer;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s ease, color 0.2s ease;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+
+    .site-nav button:hover,
+    .site-nav button:focus-visible {
+      color: #ffffff;
+      border-bottom-color: rgba(255, 255, 255, 0.6);
+      outline: none;
+    }
+
+    .nav-dropdown {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .nav-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 10px);
+      left: 50%;
+      transform: translateX(-50%) translateY(-6px);
+      min-width: 180px;
+      padding: 8px;
+      border-radius: 12px;
+      background: rgba(8, 14, 30, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    .nav-dropdown:hover .nav-dropdown-menu,
+    .nav-dropdown:focus-within .nav-dropdown-menu {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .nav-dropdown-menu a {
+      display: block;
+      padding: 10px 10px;
+      border-radius: 10px;
+      border-bottom: 0;
+      text-transform: none;
+      letter-spacing: 0.6px;
+      color: #e7f0ff;
+    }
+
+    .nav-dropdown-menu a:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-bottom: 0;
+    }
   </style>
 </head>
 <body>
   <header class="site-header">
     <div class="brand">FiresChain</div>
     <nav class="site-nav" aria-label="Primary">
-      <a href="#products">Products</a>
-      <a href="#services">Services</a>
-      <a href="#solutions">Solutions</a>
+      <div class="nav-dropdown">
+        <button type="button" aria-haspopup="true" aria-label="Wiki">Wiki</button>
+        <div class="nav-dropdown-menu" role="menu" aria-label="Wiki menu">
+          <a role="menuitem" href="/onmyoji-wiki">onmyoji-wiki</a>
+        </div>
+      </div>
       <a href="#about">About Us</a>
-      <a href="#contact">Contact</a>
     </nav>
   </header>
   <div id="scene-root"></div>
